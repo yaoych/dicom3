@@ -11,9 +11,9 @@ import org.dicom.core.DataElement;
 import org.dicom.core.Tag;
 import org.dicom.core.VRType;
 
-public class DicomReader {
+public class DicomExplicitReader {
 
-	public DicomReader(BinaryReader binaryReader) {
+	public DicomExplicitReader(BinaryReader binaryReader) {
 		this.binaryReader = binaryReader;
 	}
 
