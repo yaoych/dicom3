@@ -16,10 +16,15 @@ public abstract class BinaryReader implements Closeable {
 	}
 
 	private InputStream inputs;
+	private long offset = 0;
 
 	@Override
 	public void close() throws IOException {
 		inputs.close();
+	}
+
+	public long offset() {
+		return offset;
 	}
 
 	public byte readByte() throws IOException {
@@ -27,12 +32,14 @@ public abstract class BinaryReader implements Closeable {
 		if (b == -1) {
 			throw new EOFException();
 		}
+		offset++;
 		return (byte) b;
 	}
 
 	public byte[] readBytes(int len) throws IOException {
 		byte[] b = new byte[len];
 		int len2 = inputs.read(b, 0, len);
+		offset += len2;
 		if (len != len2) {
 			throw new EOFException();
 		}
@@ -66,6 +73,7 @@ public abstract class BinaryReader implements Closeable {
 	private long read(int size) throws IOException {
 		assert size <= SIZE_OF_LONG;
 		int len = inputs.read(buf, 0, size);
+		offset += len;
 		if (len == -1) {
 			throw new EOFException();
 		}
