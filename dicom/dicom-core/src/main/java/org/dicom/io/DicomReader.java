@@ -1,5 +1,7 @@
 package org.dicom.io;
 
+import java.io.Closeable;
+import java.io.EOFException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -11,8 +13,12 @@ import org.dicom.core.DataSet;
 import org.dicom.core.Tag;
 import org.dicom.core.Tags;
 import org.dicom.core.VRType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public abstract class DicomReader {
+public abstract class DicomReader implements Closeable {
+
+	Logger logger = LoggerFactory.getLogger(this.getClass());
 
 	DicomReader(BinaryReader binaryReader) {
 		this.binaryReader = binaryReader;
@@ -21,8 +27,31 @@ public abstract class DicomReader {
 	BinaryReader binaryReader;
 	String charset = "utf-8";
 
+	public void close() throws IOException {
+		binaryReader.close();
+	}
+
+	public Map<Tag, DataElement> read() throws IOException {
+		binaryReader.readBytes(128 + 4);
+		Map<Tag, DataElement> elems = new TreeMap<>();
+		try {
+			while (true) {
+				DataElement elem = readElement();
+				elems.put(elem.getTag(), elem);
+				logger.info(elem.toString());
+			}
+		} catch (IOException ex) {
+			logger.info("complete to read");
+			return elems;
+		}
+	}
+
 	protected Object readValue(String VR, int len) throws IOException {
 		VRType type = VRType.of(VR);
+		if (type == null) {
+			logger.info("unknown VR {}", VR);
+			type = VRType.Bytes;
+		}
 		switch (type) {
 		case String:
 			return new String(binaryReader.readBytes(len));
@@ -87,17 +116,18 @@ public abstract class DicomReader {
 	protected abstract int readLength(String VR) throws IOException;
 
 	private DataElement readElement() throws IOException {
+		logger.info("readElement");
 		Tag tag = readTag();
 		if (Tags.SQ_END_TAG.equals(tag) || Tags.ITEM_TAG.equals(tag) || Tags.ITEM_END_TAG.equals(tag)) {
 			int len = binaryReader.readInt();
+			logger.info("{} {}", tag, len);
 			return new DataElement(tag, null, null, len);
 		}
 		String vr = readVR();
 		int len = readLength(vr);
+		logger.info("{} {} {}", tag, vr, len);
 		Object value = null;
 		if (!vr.equals("SQ")) {
-			if (len < 0)
-				throw new IOException("value length is too big to read");
 			value = readValue(vr, len);
 		} else {
 			List<Map<Tag, DataElement>> value2;
@@ -114,9 +144,11 @@ public abstract class DicomReader {
 	}
 
 	private List<Map<Tag, DataElement>> readNestedDataSetWithoutLen() throws IOException {
+		logger.info("nest SQ begin");
 		List<Map<Tag, DataElement>> dataSet = new ArrayList<>();
 		DataElement elem = readElement();
 		while (elem.getTag().equals(Tags.ITEM_TAG)) {
+			logger.info("nest item");
 			if (elem.getLen() > 0) {
 				dataSet.add(readGroup(elem.getLen()));
 			} else {
@@ -129,8 +161,10 @@ public abstract class DicomReader {
 				assert inner.getTag().equals(Tags.ITEM_END_TAG);
 				dataSet.add(group);
 			}
+			elem = readElement();
 		}
 		assert elem.getTag().equals(Tags.SQ_END_TAG);
+		logger.info("nest SQ end");
 		return dataSet;
 	}
 

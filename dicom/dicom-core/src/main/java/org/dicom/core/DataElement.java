@@ -1,8 +1,5 @@
 package org.dicom.core;
 
-import java.util.Arrays;
-import java.util.List;
-
 public class DataElement {
 
 	public DataElement(Tag tag, String VR, Object value, int len) {
@@ -16,6 +13,11 @@ public class DataElement {
 	private String VR;
 	private Object value;
 	private int len;
+
+	@Override
+	public String toString() {
+		return tag.toString() + " " + VR + " " + len + " : " + value;
+	}
 
 	public void setTag(Tag tag) {
 		this.tag = tag;

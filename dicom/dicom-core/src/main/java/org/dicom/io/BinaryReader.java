@@ -15,8 +15,8 @@ public abstract class BinaryReader implements Closeable {
 		this.inputs = inputs;
 	}
 
-	private InputStream inputs;
-	private long offset = 0;
+	InputStream inputs;
+	int offset = 0;
 
 	@Override
 	public void close() throws IOException {
