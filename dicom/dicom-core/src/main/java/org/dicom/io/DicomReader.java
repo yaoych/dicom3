@@ -2,6 +2,10 @@ package org.dicom.io;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 import org.dicom.core.DataElement;
 import org.dicom.core.Tag;
@@ -17,29 +21,96 @@ public class DicomReader {
 	String charset = "utf-8";
 	boolean isExplicit = true;
 
-	public DataElement read() throws IOException {
+	// read element
+	public DataElement readElement() throws IOException {
+		Tag tag = readTag();
+		if (SQ_END_TAG.equals(tag) || ITEM_TAG.equals(tag) || ITEM_END_TAG.equals(tag)) {
+			int len = binaryReader.readInt();
+			return new DataElement(tag, null, null, len);
+		}
+		String vr = readVR();
+		int len = readLength(vr);
+		Object value = null;
+		if (!vr.equals("SQ")) {
+			if (len < 0)
+				throw new IOException("value length is too big to read");
+			value = readValue(vr, len);
+		} else {
+			if (len < 0) {
+				value = readNestedDataSetWithoutLen();
+			} else {
+				value = readNestedDataSetWithLen(len);
+			}
+		}
+		return new DataElement(tag, vr, value, len);
+	}
+
+	private Map<Tag, DataElement> readGroup(int len) throws IOException {
+		int size = len;
+		Map<Tag, DataElement> elems = new TreeMap<>();
+		while (size > 0) {
+			DataElement elem = readElement();
+			elems.put(elem.getTag(), elem);
+			size -= getSize(elem);
+		}
+		assert size == 0;
+		return elems;
+	}
+
+	public static final Tag ITEM_TAG = new Tag(0XFFFE, 0XE000);
+	public static final Tag ITEM_END_TAG = new Tag(0XFFFE, 0XE00D);
+	public static final Tag SQ_END_TAG = new Tag(0XFFFE, 0XE0DD);
+
+	private List<Map<Tag, DataElement>> readNestedDataSetWithoutLen() throws IOException {
+		List<Map<Tag, DataElement>> dataSet = new ArrayList<>();
+		DataElement elem = readElement();
+		while (elem.getTag().equals(ITEM_TAG)) {
+			if (elem.getLen() > 0) {
+				Map<Tag, DataElement> group = readGroup(elem.getLen());
+				dataSet.add(group);
+			} else {
+				Map<Tag, DataElement> group = new TreeMap<>();
+				elem = readElement();
+				while (!elem.getTag().equals(ITEM_END_TAG)) {
+					group.put(elem.getTag(), elem);
+				}
+				dataSet.add(group);
+			}
+		}
+		assert elem.getTag().equals(SQ_END_TAG);
+		return dataSet;
+	}
+
+	private List<Map<Tag, DataElement>> readNestedDataSetWithLen(int len) throws IOException {
+		List<Map<Tag, DataElement>> dataSet = new ArrayList<>();
+		DataElement elem = readElement();
+		while (len > 0) {
+			if (elem.getLen() > 0) {
+				Map<Tag, DataElement> group = readGroup(elem.getLen());
+				dataSet.add(group);
+				len -= getSize(elem);
+			} else {
+				Map<Tag, DataElement> group = new TreeMap<>();
+				elem = readElement();
+				len -= getSize(elem);
+				while (!elem.getTag().equals(ITEM_END_TAG)) {
+					group.put(elem.getTag(), elem);
+				}
+				dataSet.add(group);
+			}
+		}
+		assert len == 0;
+		return dataSet;
+	}
+
+	private Tag readTag() throws IOException {
 		short groupId = binaryReader.readShort();
 		short elementNumber = binaryReader.readShort();
 		Tag tag = new Tag(groupId & 0X0000FFFF, elementNumber & 0X0000FFFF);
-		String vr = new String(binaryReader.readBytes(2));
-		int vl = 0;
-		if (vr.startsWith("O") || vr.equals("SQ")) {
-			binaryReader.readShort();// skip 000H reserved
-			vl = binaryReader.readInt();
-		} else {
-			vl = binaryReader.readShort() & 0X0000FFFF;
-		}
-		if(vr.equals("SQ")) {
-			ArrayList<DataElement> sq = new ArrayList<>();
-			do {
-				read();
-			}
-		}
-		Object value = readValue(vr, vl);
-		return new DataElement(tag, vr, value);
+		return tag;
 	}
 
-	Object readValue(String VR, int len) throws IOException {
+	private Object readValue(String VR, int len) throws IOException {
 		VRType type = VRType.of(VR);
 		switch (type) {
 		case String:
@@ -93,4 +164,42 @@ public class DicomReader {
 		}
 	}
 
+	private String readVR() throws IOException {
+		return new String(binaryReader.readBytes(2));
+	}
+
+	private int readLength(String VR) throws IOException {
+		if (isVeryLongValue(VR)) {
+			binaryReader.readShort();
+			return binaryReader.readInt();
+		} else {
+			return binaryReader.readShort();
+		}
+
+	}
+
+	private List<String> veryLongVRs = Arrays.asList("OB", "OD", "OF", "OL", "OW", "SQ", "UC", "UR", "UT", "UN");
+
+	private boolean isVeryLongValue(String VR) {
+		return veryLongVRs.contains(VR);
+	}
+
+	private int getSize(DataElement elem) {
+		int len = 0;
+		if (elem.getTag() != null)
+			len += 4;// tag
+		if (elem.getVR() != null) {
+			len += 2;// vr
+			if (isVeryLongValue(elem.getVR()))
+				len += 6;// 000H and 4 bytes of length
+			else
+				len += 2;// len of length
+		} else {
+			len += 4;// implicit length stands 4 bytes
+		}
+		if (elem.getLen() > 0) {
+			len += elem.getLen();// value length
+		}
+		return len;
+	}
 }
